@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <omp.h>
+#include <string.h>
 
 #define TYPE_LIST(O) \
   O(int8_t, i8, "%d") \
@@ -20,9 +21,10 @@
 #define X(real_type, alias, printformat) typedef real_type alias;
 TYPE_LIST(X)
 
-// Declare all types of Array
+// Declare all types of Array 
+//T * restrict data; // removed for testing
 #define DeclareArray(T) typedef struct { \
-  T * restrict data; \
+  T * data; \
   size_t size; \
 } T##Array;
 
@@ -54,12 +56,18 @@ TYPE_LIST(X)
 
 // Defines all rands functions
 #define DefineRand(T) \
-  void rand_##T(T##Array array, u32 seed, u64 max_value) { \
+  void rand_##T(T##Array array, u32 seed, T max_value) { \
     _Pragma("omp parallel") \
     { \
     u32 my_seed = seed * (omp_get_thread_num() + 1); \
     _Pragma("omp for") \
-    for (size_t i = 0; i < array.size; i++) array.data[i] = rand_r(&my_seed) % max_value; \
+    for (size_t i = 0; i < array.size; i++) { \
+      array.data[i] = _Generic((T)0, \
+          f32:  ((f32)rand_r(&my_seed) / (f32)RAND_MAX) * (f32)max_value, \
+          f64: ((f64)rand_r(&my_seed) / (f64)RAND_MAX) * (f64)max_value, \
+          default: (T)(rand_r(&my_seed) % (u64) max_value) \
+        ); \
+      } \
     } \
   }
 
@@ -71,9 +79,9 @@ TYPE_LIST(X)
       return; \
     } \
     _Pragma("omp parallel for") \
-      for (size_t i = 0; i < array1.size; i++) { \
-        dest.data[i] = array1.data[i] + array2.data[i]; \
-      } \
+    for (size_t i = 0; i < array1.size; i++) { \
+      dest.data[i] = array1.data[i] + array2.data[i]; \
+    } \
   }
 
 // Defines all scalar functions
@@ -170,24 +178,15 @@ TYPE_LIST(GENERATE_ALL)
 #define cml_dot(arr1, arr2) _Generic((arr1), TYPE_LIST(DISPATCH_DOT) default: NULL)(arr1, arr2)
 #define cml_map(arr, func, dest) _Generic((arr), TYPE_LIST(DISPATCH_MAP) default: NULL)(arr, func, dest)
 
-// GNU only
-#define ArrayInit(name, T, size) \
-  __attribute__((cleanup(free_##T##Array))) T##Array name = Array(T, size);
-
-i32 mul_2(i32 x) {
-  return x * 2;
-}
+// GNU only, using __VA_ARGS__ to start the Array with stack values
+#define ArrayInit(name, T, size, ...) \
+  __attribute__((cleanup(free_##T##Array))) T##Array name = Array(T, size); \
+  __VA_OPT__(memcpy(name.data, (T[]){__VA_ARGS__}, size*sizeof(T)))
 
 int main() {
-  size_t size = 10;
-  ArrayInit(array, i32, size);
-  ArrayInit(array1, i32, size);
-  ArrayInit(dest, i32, size);
+  ArrayInit(input, f32, 3, 1.0, 2.0, 3.0);
+  ArrayInit(target, f32, 3, 2.0, 4.0, 6.0);
 
-  cml_rand(array, 42, 256);
-  cml_rand(array1, 41, 256);
-  cml_print(array);
-  cml_print(array1);
-  
+  cml_print(input);
   return 0;
 }
