@@ -1,10 +1,12 @@
-# WIP - A simple c library to work with machine learning
+# WIP - A simple C library to work with machine learning
 ---
 
-The idea is to have only a .h file and you can use that anywhere
+The goal is to provide header-only library that you can use that anywhere.
+
+Note: RAII is implemented using `__attribute__((cleanup))`, which only works in Clang and GCC. Manual memory management is still available through `FreeArray(array)`, `FreeArrayPointer(array_pointer)`, and `Array(T, size)`.
 
 ## Todo(s)
-  - Correct the return values model to fill values, like func(src1, src2, dest) to make it more strict to the user, so that less memory leaks occur
-  - Make it work in offload if the user wants to or in parts with bigger Arrays
-  - ~Comment the functions~
-  - Implement a simple neural network to see the performance of this
+  - ~Update the functions models to use destination buffers, e.g., `func(src1, src2, dest)`. This enforces stricter memory management and reduces leaks.~
+  - Add support for hardware offloading (GPU) or handling very large arrays in chuncks.
+  - ~Add documentation/comments for all functions~ (PARTIAL DONE)
+  - Implement a simple neural network to benchmark performance.

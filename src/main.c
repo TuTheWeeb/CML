@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -33,7 +34,7 @@ TYPE_LIST(X)
     free(array.data);
 
 // For manual use
-#define FreeArrayPointer(array) \
+#define FreeArrayPointer(array_pointer) \
   FreeArray(*array); \
   free(array);
 
@@ -64,25 +65,23 @@ TYPE_LIST(X)
 
 // Defines all sum functions
 #define DefineSum(T) \
-  T##Array sum_##T(T##Array array1, T##Array array2) { \
+  void sum_##T(T##Array array1, T##Array array2, T##Array dest) { \
     if (array1.size != array2.size) { \
       printf("The arrays have different sizes (%ld != %ld), returning error!\n", array1.size, array2.size); \
-      return (T##Array) {.data=NULL, .size=0}; \
+      return; \
     } \
-    T##Array ret = Array(T, array1.size); \
     _Pragma("omp parallel for") \
       for (size_t i = 0; i < array1.size; i++) { \
-        ret.data[i] = array1.data[i] + array2.data[i]; \
+        dest.data[i] = array1.data[i] + array2.data[i]; \
       } \
-    return ret; \
   }
 
 // Defines all scalar functions
 #define DefineScalarMUL(T) \
-  void scalar_mul_##T(T##Array array, u64 scalar) { \
+  void scalar_mul_##T(T##Array array, u64 scalar, T##Array dest) { \
     _Pragma("omp parallel for") \
       for (size_t i = 0; i < array.size; i++) { \
-        array.data[i] = array.data[i] * (T) scalar; \
+        dest.data[i] = array.data[i] * (T) scalar; \
       } \
   }
 
@@ -103,17 +102,15 @@ TYPE_LIST(X)
 
 // Defines all map functions
 #define DefineMap(T) \
-    T##Array map_##T##Array(T##Array array, T (*func)(T)) { \
+    void map_##T##Array(T##Array array, T (*func)(T), T##Array dest) { \
       if (array.data == NULL) { \
         printf("Array is empty\n"); \
-        return (T##Array) {.data=NULL, .size=0}; \
+        return; \
       } \
-      T##Array ret = Array(T, array.size); \
       _Pragma("omp parallel for") \
       for (size_t i = 0; i < array.size; i++) {\
-        ret.data[i] = func(array.data[i]); \
+        dest.data[i] = func(array.data[i]); \
       } \
-      return ret; \
     }
 
 // Defines all print functions
@@ -166,31 +163,31 @@ TYPE_LIST(GENERATE_ALL)
 #define cml_zeros(arr) _Generic((arr), TYPE_LIST(DISPATCH_ZEROS) default: NULL)(arr)
 #define cml_ones(arr) _Generic((arr), TYPE_LIST(DISPATCH_ONES) default: NULL)(arr)
 #define cml_rand(arr, s, max) _Generic((arr), TYPE_LIST(DISPATCH_RAND) default: NULL)(arr, s, max)
-#define cml_sum(arr1, arr2) _Generic((arr1), TYPE_LIST(DISPATCH_SUM) default: NULL)(arr1, arr2)
+#define cml_sum(arr1, arr2, dest) _Generic((arr1), TYPE_LIST(DISPATCH_SUM) default: NULL)(arr1, arr2, dest)
 #define cml_print_n(arr, limit) _Generic((arr), TYPE_LIST(DISPATCH_PRINT) default: NULL)(arr, limit)
 #define cml_print(arr) _Generic((arr), TYPE_LIST(DISPATCH_PRINT) default: NULL)(arr, arr.size)
-#define cml_scalar_mul(arr, scalar) _Generic((arr), TYPE_LIST(DISPATCH_SCALAR_MUL) default: NULL)(arr, scalar)
+#define cml_scalar_mul(arr, scalar, dest) _Generic((arr), TYPE_LIST(DISPATCH_SCALAR_MUL) default: NULL)(arr, scalar, dest)
 #define cml_dot(arr1, arr2) _Generic((arr1), TYPE_LIST(DISPATCH_DOT) default: NULL)(arr1, arr2)
-#define cml_map(arr, func) _Generic((arr), TYPE_LIST(DISPATCH_MAP) default: NULL)(arr, func)
+#define cml_map(arr, func, dest) _Generic((arr), TYPE_LIST(DISPATCH_MAP) default: NULL)(arr, func, dest)
 
 // GNU only
 #define ArrayInit(name, T, size) \
   __attribute__((cleanup(free_##T##Array))) T##Array name = Array(T, size);
 
+i32 mul_2(i32 x) {
+  return x * 2;
+}
+
 int main() {
   size_t size = 10;
-  ArrayInit(array, i8, size);
-  ArrayInit(array1, i8, size);
+  ArrayInit(array, i32, size);
+  ArrayInit(array1, i32, size);
+  ArrayInit(dest, i32, size);
 
   cml_rand(array, 42, 256);
   cml_rand(array1, 41, 256);
   cml_print(array);
   cml_print(array1);
-  i8 res = cml_dot(array, array1);
-  printf("res: %d\n", res);
-
-  cml_print(array);
-  cml_print(array1);
-
+  
   return 0;
 }
