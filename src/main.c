@@ -21,7 +21,7 @@
 TYPE_LIST(X)
 
 #define DeclareArray(T) typedef struct { \
-  T * data; \
+  T * restrict data; \
   size_t size; \
 } T##Array;
 
@@ -57,7 +57,7 @@ TYPE_LIST(X)
 #define DefineSum(T) \
   T##Array sum_##T(T##Array array1, T##Array array2) { \
     if (array1.size != array2.size) { \
-      printf("The arrays have different sizes (%ld != %ld), returning error! ", array1.size, array2.size); \
+      printf("The arrays have different sizes (%ld != %ld), returning error!\n", array1.size, array2.size); \
       return (T##Array) {.data=NULL, .size=0}; \
     } \
     T##Array ret = Array(T, array1.size); \
@@ -79,13 +79,27 @@ TYPE_LIST(X)
 #define DefineDotProduct(T) \
     T##Array dot_product_##T(T##Array array1, T##Array array2) { \
       if (array1.size != array2.size) {\
-        printf("The arrays have different sizes (%ld != %ld), returning error! ", array1.size, array2.size); \
+        printf("The arrays have different sizes (%ld != %ld), returning error!\n", array1.size, array2.size); \
         return (T##Array) {.data=NULL, .size=0}; \
       } \
       T##Array ret = Array(T, array1.size); \
       _Pragma("omp parallel for") \
       for (size_t i = 0; i < array1.size; i++) {\
         ret.data[i] = array1.data[i] * array2.data[i]; \
+      } \
+      return ret; \
+    }
+
+#define DefineMap(T) \
+    T##Array map_##T##Array(T##Array array, T (*func)(T)) { \
+      if (array.data == NULL) { \
+        printf("Array is empty\n"); \
+        return (T##Array) {.data=NULL, .size=0}; \
+      } \
+      T##Array ret = Array(T, array.size); \
+      _Pragma("omp parallel for") \
+      for (size_t i = 0; i < array.size; i++) {\
+        ret.data[i] = func(array.data[i]); \
       } \
       return ret; \
     }
@@ -113,6 +127,7 @@ TYPE_LIST(X)
   DefineSum(alias) \
   DefineScalarMUL(alias) \
   DefineDotProduct(alias) \
+  DefineMap(alias) \
   DefinePrint(alias, format)
 TYPE_LIST(GENERATE_ALL)
 
@@ -123,6 +138,7 @@ TYPE_LIST(GENERATE_ALL)
 #define DISPATCH_PRINT(real_type, alias, format) alias##Array: print_##alias##Array,
 #define DISPATCH_SCALAR_MUL(real_type, alias, format) alias##Array: scalar_mul_##alias,
 #define DISPATCH_DOT(real_type, alias, format) alias##Array: dot_product_##alias,
+#define DISPATCH_MAP(real_type, alias, format) alias##Array: map_##alias##Array,
 
 #define cml_zeros(arr) _Generic((arr), TYPE_LIST(DISPATCH_ZEROS) default: NULL)(arr)
 #define cml_ones(arr) _Generic((arr), TYPE_LIST(DISPATCH_ONES) default: NULL)(arr)
@@ -131,17 +147,21 @@ TYPE_LIST(GENERATE_ALL)
 #define cml_print(arr, limit) _Generic((arr), TYPE_LIST(DISPATCH_PRINT) default: NULL)(arr, limit)
 #define cml_scalar_mul(arr, scalar) _Generic((arr), TYPE_LIST(DISPATCH_SCALAR_MUL) default: NULL)(arr, scalar)
 #define cml_dot(arr1, arr2) _Generic((arr1), TYPE_LIST(DISPATCH_DOT) default: NULL)(arr1, arr2)
+#define cml_map(arr, func) _Generic((arr), TYPE_LIST(DISPATCH_MAP) default: NULL)(arr, func)
+
+i8 mul_2(i8 x) {
+  return x * 2;
+}
 
 int main() {
   size_t size = 10;
   i8Array array = Array(i8, size);
-  i8Array array2 = Array(i8, size);
 
-  if (array.data != NULL || array2.data != NULL) {
+  if (array.data != NULL) {
     cml_rand(array, 42, 5);
-    cml_rand(array2, 97, 6);
-    i8Array res = cml_dot(array, array2);
-    cml_print(res, res.size);
+    cml_print(array, array.size);
+    i8Array mapped = cml_map(array, mul_2);
+    cml_print(mapped, mapped.size);
   }
 
   return 0;
