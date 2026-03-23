@@ -1,5 +1,11 @@
 
+SRC=src
+BUILD=build
+
+.PHONY: build run
 
 build:
-	gcc -fopenmp main.c -o main
-	./main
+	gcc -fopenmp $(SRC)/main.c -o $(BUILD)/main
+
+run:
+	build/main
