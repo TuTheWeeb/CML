@@ -193,7 +193,8 @@ TYPE_LIST(GENERATE_ALL)
   void zeros_##T##Matrix(T##Matrix matrix) { \
     _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix.rs; i++) { \
-      zeros_##T(matrix.data[i]); \
+      for (size_t j = 0; i < matrix.cs; j++) \
+        matrix.data[i].data[j] = 0;\
     } \
   }
 
@@ -202,14 +203,14 @@ TYPE_LIST(GENERATE_ALL)
   void ones_##T##Matrix(T##Matrix matrix) { \
     _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix.rs; i++) { \
-      ones_##T(matrix.data[i]); \
+      for (size_t j = 0; i < matrix.cs; j++) \
+        matrix.data[i].data[j] = 1;\
     } \
   }
 
 // Defines all rands functions
 #define DefineRandMatrix(T) \
   void rand_##T##Matrix(T##Matrix matrix, u32 seed, T max_value) { \
-    _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix.rs; i++) { \
       rand_##T(matrix.data[i], seed, max_value); \
     } \
@@ -222,40 +223,39 @@ TYPE_LIST(GENERATE_ALL)
       printf("Both matrix have different dimensions (rs1: %ld != rs2: %ld && cs1: %ld != cs2: %ld), returning error!\n", matrix1.rs, matrix2.rs, matrix1.cs, matrix2.cs); \
       return; \
     } \
+    _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix1.rs; i++) { \
-      sum_##T(matrix1.data[i], matrix2.data[i], dest.data[i]); \
+      for (size_t j = 0; j < matrix1.cs; j++) \
+        dest.data[i].data[j] = matrix1.data[i].data[j] + matrix2.data[i].data[j]; \
     } \
   }
 
 // Defines all scalar functions
 #define DefineScalarMULMatrix(T) \
   void scalar_mul_##T##Matrix(T##Matrix matrix , T scalar, T##Matrix dest) { \
+      _Pragma("omp parallel for") \
       for (size_t i = 0; i < matrix.rs; i++) { \
-        scalar_mul_##T(matrix.data[i], scalar, dest.data[i]); \
-      } \
+        for (size_t j = 0; j < matrix.cs; j++) \
+          dest.data[i].data[j] = matrix.data[i].data[j] * scalar; \
+    } \
   }
 
 // Defines all matrix mul functions 
 #define DefineMultiplicationMatrix(T) \
     void mul_matrix_##T##Matrix(T##Matrix matrix1, T##Matrix matrix2, T##Matrix dest) { \
-        if (matrix1.cs != matrix2.rs) { \
-        printf("Matrix multiplication mismatch: %ldx%ld * %ldx%ld\n", \
-                matrix1.rs, matrix1.cs, matrix2.rs, matrix2.cs); \
-        return; \
-      } \
-      if (dest.rs != matrix1.rs || dest.cs != matrix2.cs) { \
-        printf("Destination matrix mismatch. Expected %ldx%ld\n", \
-                matrix1.rs, matrix2.cs); \
-        return; \
+      if (matrix1.cs != matrix2.rs || dest.rs != matrix1.rs || dest.cs != matrix2.cs) { \
+        printf("MatMul dimension mismatch!\n"); return; \
       } \
       _Pragma("omp parallel for") \
       for (size_t i = 0; i < matrix1.rs; i++) { \
-        for (size_t j = 0; j < matrix2.cs; j++) { \
-          T sum = 0; \
-          for (size_t k = 0; k < matrix1.cs; k++) { \
-            sum += matrix1.data[i].data[k] * matrix2.data[k].data[j]; \
+        /* Initialize the destination row to 0 first */ \
+        for (size_t j = 0; j < matrix2.cs; j++) dest.data[i].data[j] = 0; \
+        /* The i, k, j loop ordering for Cache Locality */ \
+        for (size_t k = 0; k < matrix1.cs; k++) { \
+          T r = matrix1.data[i].data[k]; \
+          for (size_t j = 0; j < matrix2.cs; j++) { \
+            dest.data[i].data[j] += r * matrix2.data[k].data[j]; \
           } \
-          dest.data[i].data[j] = sum; \
         } \
       } \
     }
