@@ -235,19 +235,29 @@ TYPE_LIST(GENERATE_ALL)
       } \
   }
 
-// Defines all dot product funcions
-#define DefineDotProductMatrix(T) \
-    T dot_product_##T(T##Array array1, T##Array array2) { \
-      if (array1.size != array2.size) {\
-        printf("The arrays have different sizes (%ld != %ld), returning error!\n", array1.size, array2.size); \
-        return (T) 0; \
+// Defines all matrix mul functions 
+#define DefineMultiplicationMatrix(T) \
+    void mul_matrix_##T##Matrix(T##Matrix matrix1, T##Matrix matrix2, T##Matrix dest) { \
+        if (matrix1.cs != matrix2.rs) { \
+        printf("Matrix multiplication mismatch: %ldx%ld * %ldx%ld\n", \
+                matrix1.rs, matrix1.cs, matrix2.rs, matrix2.cs); \
+        return; \
       } \
-      T acum = 0; \
-      _Pragma("omp parallel for reduction(+:acum)") \
-      for (size_t i = 0; i < array1.size; i++) {\
-        acum += array1.data[i] * array2.data[i]; \
+      if (dest.rs != matrix1.rs || dest.cs != matrix2.cs) { \
+        printf("Destination matrix mismatch. Expected %ldx%ld\n", \
+                matrix1.rs, matrix2.cs); \
+        return; \
       } \
-      return acum; \
+      _Pragma("omp parallel for") \
+      for (size_t i = 0; i < matrix1.rs; i++) { \
+        for (size_t j = 0; j < matrix2.cs; j++) { \
+          T sum = 0; \
+          for (size_t k = 0; k < matrix1.cs; k++) { \
+            sum += matrix1.data[i].data[k] * matrix2.data[k].data[j]; \
+          } \
+          dest.data[i].data[j] = sum; \
+        } \
+      } \
     }
 
 // Defines all map functions
@@ -307,6 +317,7 @@ TYPE_LIST(GENERATE_ALL)
   DefineMapMatrix(alias) \
   DefineMatrixFree(alias) \
   DefinePrintMatrix(alias) \
+  DefineMultiplicationMatrix(alias) \
   DefinePrintWrapperMatrix(alias)
 TYPE_LIST(GENERATE_ALL)
 
@@ -321,77 +332,67 @@ TYPE_LIST(GENERATE_ALL)
 #define DISPATCH_DOT(real_type, alias, format) alias##Array: dot_product_##alias,
 #define DISPATCH_MAP(real_type, alias, format) alias##Array: map_##alias##Array,
 
-// Use the DISPATCHES to create generics
-//#define cml_zeros(arr) _Generic((arr), TYPE_LIST(DISPATCH_ZEROS) default: NULL)(arr)
-//#define cml_ones(arr) _Generic((arr), TYPE_LIST(DISPATCH_ONES) default: NULL)(arr)
-//#define cml_rand(arr, s, max) _Generic((arr), TYPE_LIST(DISPATCH_RAND) default: NULL)(arr, s, max)
-//#define cml_sum(arr1, arr2, dest) _Generic((arr1), TYPE_LIST(DISPATCH_SUM) default: NULL)(arr1, arr2, dest)
-//#define cml_print_n(arr, limit) _Generic((arr), TYPE_LIST(DISPATCH_PRINT) default: NULL)(arr, limit)
-//#define cml_print(arr) _Generic((arr), TYPE_LIST(DISPATCH_PRINT) default: NULL)(arr, arr.size)
-//#define cml_scalar_mul(arr, scalar, dest) _Generic((arr), TYPE_LIST(DISPATCH_SCALAR_MUL) default: NULL)(arr, scalar, dest)
-//#define cml_dot(arr1, arr2) _Generic((arr1), TYPE_LIST(DISPATCH_DOT) default: NULL)(arr1, arr2)
-//#define cml_map(arr, func, dest) _Generic((arr), TYPE_LIST(DISPATCH_MAP) default: NULL)(arr, func, dest)
-
-// Creates DISPATCHES for all functions
-#define DISPATCH_ZEROS_MATRIX(real_type, alias, format) alias##Matrix: zeros_##alias(x),
-#define DISPATCH_ONES_MATRIX(real_type, alias, format) alias##Matrix: ones_##alias(x),
-#define DISPATCH_RAND_MATRIX(real_type, alias, format) alias##Matrix: rand_##alias,
-#define DISPATCH_SUM_MATRIX(real_type, alias, format) alias##Matrix: sum_##alias,
+#define DISPATCH_ZEROS_MATRIX(real_type, alias, format) alias##Matrix: zeros_##alias##Matrix,
+#define DISPATCH_ONES_MATRIX(real_type, alias, format) alias##Matrix: ones_##alias##Matrix,
+#define DISPATCH_RAND_MATRIX(real_type, alias, format) alias##Matrix: rand_##alias##Matrix,
+#define DISPATCH_SUM_MATRIX(real_type, alias, format) alias##Matrix: sum_##alias##Matrix,
 #define DISPATCH_PRINT_WRAPPER_MATRIX(real_type, alias, format) alias##Matrix: print_wrapper_##alias##Matrix,
 #define DISPATCH_PRINT_MATRIX(real_type, alias, format) alias##Matrix: print_##alias##Matrix,
-#define DISPATCH_SCALAR_MUL_MATRIX(real_type, alias, format) alias##Matrix: scalar_mul_##alias,
-#define DISPATCH_DOT_MATRIX(real_type, alias, format) alias##Matrix: dot_product_##alias,
+#define DISPATCH_SCALAR_MUL_MATRIX(real_type, alias, format) alias##Matrix: scalar_mul_##alias##Matrix,
+#define DISPATCH_MUL_MATRIX(real_type, alias, format) alias##Matrix: mul_matrix_##alias##Matrix,
 #define DISPATCH_MAP_MATRIX(real_type, alias, format) alias##Matrix: map_##alias##Matrix,
 
-// Use the DISPATCHES to create generics
-//#define cml_zeros_matrix(matrix) _Generic((matrix), TYPE_LIST(DISPATCH_ZEROS_MATRIX) default: NULL)(matrix)
-//#define cml_ones_matrix(matrix) _Generic((matrix), TYPE_LIST(DISPATCH_ONES_MATRIX) default: NULL)(matrix)
-//#define cml_rand_matrix(matrix, s, max) _Generic((matrix), TYPE_LIST(DISPATCH_RAND_MATRIX) default: NULL)(matrix, s, max)
-//#define cml_sum_matrix(matrix1, matrix2, dest) _Generic((matrix1), TYPE_LIST(DISPATCH_SUM_MATRIX) default: NULL)(matrix1, matrix2, dest)
-//#define cml_print_n_matrix(matrix, limit) _Generic((matrix), TYPE_LIST(DISPATCH_PRINT_MATRIX) default: NULL)(matrix, limit)
-//#define cml_print_matrix(matrix) _Generic((matrix), TYPE_LIST(DISPATCH_PRINT_MATRIX) default: NULL)(matrix, matrix.size)
-//#define cml_scalar_mul_matrix(matrix, scalar, dest) _Generic((matrix), TYPE_LIST(DISPATCH_SCALAR_MUL_MATRIX) default: NULL)(matrix, scalar, dest)
-//#define cml_dot_matrix(matrix1, matrix2) _Generic((matrix1), TYPE_LIST(DISPATCH_DOT_MATRIX) default: NULL)(matrix1, matrix2)
-//#define cml_map_matrix(matrix, func, dest) _Generic((matrix), TYPE_LIST(DISPATCH_MAP_MATRIX) default: NULL)(matrix, func, dest)
-
+// Macro for each variant of functions
 #define cml_zeros(obj) _Generic((obj), \
     TYPE_LIST(DISPATCH_ZEROS) \
     TYPE_LIST(DISPATCH_ZEROS_MATRIX) \
-    default: NULL)(obj)
+    default: NULL \
+    )(obj)
 #define cml_ones(obj) _Generic((obj), \
     TYPE_LIST(DISPATCH_ONES) \
     TYPE_LIST(DISPATCH_ONES_MATRIX) \
-    default: NULL)(obj)
+    default: NULL \
+    )(obj)
 #define cml_rand(obj, s, max) _Generic((obj), \
     TYPE_LIST(DISPATCH_RAND) \
     TYPE_LIST(DISPATCH_RAND_MATRIX) \
-    default: NULL)(obj, s, max)
+    default: NULL \
+    )(obj, s, max)
 #define cml_sum(obj1, obj2, dest) _Generic((obj1), \
     TYPE_LIST(DISPATCH_SUM) \
     TYPE_LIST(DISPATCH_SUM_MATRIX) \
-    default: NULL)(obj1, obj2, dest)
+    default: NULL \
+    )(obj1, obj2, dest)
 #define cml_print_n(obj, limit) _Generic((obj), \
     TYPE_LIST(DISPATCH_PRINT) \
-    default: NULL)(obj, limit)
+    default: NULL \
+    )(obj, limit)
 #define cml_print_matrix_n(obj, w, h) _Generic((obj), \
     TYPE_LIST(DISPATCH_PRINT_MATRIX) \
-    default: NULL)(obj, w, h)
+    default: NULL \
+    )(obj, w, h)
 #define cml_print(obj) _Generic((obj), \
     TYPE_LIST(DISPATCH_PRINT_WRAPPER) \
     TYPE_LIST(DISPATCH_PRINT_WRAPPER_MATRIX) \
-    default: NULL)(obj)
+    default: NULL \
+    )(obj)
 #define cml_scalar_mul(obj, scalar, dest) _Generic((obj), \
     TYPE_LIST(DISPATCH_SCALAR_MUL) \
     TYPE_LIST(DISPATCH_SCALAR_MUL_MATRIX) \
-    default: NULL)(obj, scalar, dest)
+    default: NULL \
+    )(obj, scalar, dest)
 #define cml_dot(obj1, obj2) _Generic((obj1), \
     TYPE_LIST(DISPATCH_DOT) \
-    TYPE_LIST(DISPATCH_DOT_MATRIX) \
     default: NULL)(obj1, obj2)
+#define cml_mul_matrix(matrix1, matrix2, dest) _Generic((matrix1), \
+    TYPE_LIST(DISPATCH_MUL_MATRIX) \
+    default: NULL \
+    )(matrix1, matrix2, dest)
 #define cml_map(obj, func, dest) _Generic((obj), \
     TYPE_LIST(DISPATCH_MAP) \
     TYPE_LIST(DISPATCH_MAP_MATRIX) \
-    default: NULL)(obj, func, dest)
+    default: NULL \
+    )(obj, func, dest)
 
 // GNU only, using __VA_ARGS__ to start the Array with stack values
 // if something go wrong its because the size of the array that you are trying to use as input is less than the size that you informed 
@@ -402,20 +403,24 @@ TYPE_LIST(GENERATE_ALL)
       ) 
 
 #define ARG_2(a, b, ...) b
-#define IS_EMPTY(...) ARG_2(dummy __VA_OPT__(,) \
+#define IS_EMPTY(...) ARG_2(dummy __VA_OPT__(,) 0, 1, ~)
+#define CONCAT_HELPER(a, b) a##b
+#define CONCAT(a, b) CONCAT_HELPER(a, b)
+
+// Garante que vai fazer o Loop uma unica vez
+#define MATRIX_INIT_1(name, T, rows, cols) \
     for (size_t i = 0; i < name.rs; i++) { \
       name.data[i] = Array(T, cols); \
-    }, \
+    }
+
+#define MATRIX_INIT_0(name, T, rows, cols, ...) \
     { \
       T _tmp_buff[rows][cols] = {__VA_ARGS__}; \
       for (size_t i = 0; i < name.rs; i++) { \
         name.data[i] = Array(T, cols); \
         memcpy(name.data[i].data, _tmp_buff[i], cols*sizeof(T)); \
       } \
-    },\
-    ~)
-#define CONCAT_HELPER(a, b) a##b
-#define CONCAT(a, b) CONCAT_HELPER(a, b)
+    }
 
 // GNU only, using __VA_ARGS__ to start the Array with stack values
 // if something go wrong its because the size of the matrix that you are trying to use as input is less than the size that you informed
@@ -425,20 +430,15 @@ TYPE_LIST(GENERATE_ALL)
       .rs=rows,\
       .cs=cols \
   }; \
-  for (size_t i = 0; i < name.rs; i++) { \
-    name.data[i] = Array(T, cols); \
-  } \
-  __VA_OPT__({ \
-        T _tmp_buff[rows][cols] = {__VA_ARGS__}; \
-        for (size_t i = 0; i < name.rs; i++) { \
-          name.data[i] = Array(T, cols); \
-          memcpy(name.data[i].data, _tmp_buff[i], cols*sizeof(T)); \
-        } \
-      })
+  CONCAT(MATRIX_INIT_, IS_EMPTY(__VA_ARGS__))(name, T, rows, cols __VA_OPT__(,) __VA_ARGS__)
 
 int main() {
   MatrixInit(matrix, f32, 2, 2, {1.0, 3.0}, {2.0, 2.0});
   MatrixInit(matrix1, f32, 2, 2, {2.0, 3.0}, {3.0, 5.0});
-  cml_print(matrix);
+  MatrixInit(matrix2, f32, 2, 2);
+
+  cml_mul_matrix(matrix, matrix1, matrix2);
+  cml_print(matrix2);
+
   return 0;
 }
