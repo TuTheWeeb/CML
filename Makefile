@@ -8,9 +8,9 @@ FLAGS=-fopenmp -O3 -Wall -Werror -march=native
 
 .PHONY: build run
 
-build:
+build: src/*
 	$(CC) $(FLAGS) $(SRC)/main.c -o $(BUILD)/main
 
 
-run:
+run: build/main
 	build/main

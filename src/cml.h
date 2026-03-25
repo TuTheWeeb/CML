@@ -5,7 +5,9 @@
 #include <omp.h>
 #include <string.h>
 
-#define CML_CROP 1000
+#ifndef CML_CROP
+  #define CML_CROP 1000
+#endif
 
 #define TYPE_LIST(O) \
   O(int8_t, i8, "%d") \
@@ -98,6 +100,11 @@ TYPE_LIST(X)
       printf("The arrays have different sizes (%ld != %ld), returning error!\n", array1.size, array2.size); \
       return; \
     } \
+    if (array1.size < CML_CROP) {\
+      for (size_t i = 0; i < array1.size; i++) { \
+        dest.data[i] = array1.data[i] + array2.data[i]; \
+      } \
+    }\
     _Pragma("omp parallel for simd") \
     for (size_t i = 0; i < array1.size; i++) { \
       dest.data[i] = array1.data[i] + array2.data[i]; \
@@ -131,6 +138,11 @@ TYPE_LIST(X)
         dest.data[i] = array.data[i] * (T) scalar; \
       } \
       return;\
+    }\
+    if (array.size < CML_CROP) {\
+      for (size_t i = 0; i < array.size; i++) { \
+        dest.data[i] = array.data[i] * (T) scalar; \
+      } \
     }\
     _Pragma("omp parallel for simd") \
       for (size_t i = 0; i < array.size; i++) { \
@@ -616,6 +628,14 @@ TYPE_LIST(GENERATE_ALL)
         memcpy(name.data[i/cols].data, _tmp_buff + i, cols*sizeof(T)); \
       } \
     }
+
+#define CopyMatrix(matrix1, matrix2) \
+  if (matrix1.cs * matrix1.rs < CML_CROP) {\
+    for (size_t i = 0; i < matrix1.cs*matrix1.rs; i++) matrix1.allocator[i] = matrix2.allocator[i];\
+  } else {\
+    _Pragma("omp parallel for simd")\
+    for (size_t i = 0; i < matrix1.cs*matrix1.rs; i++) matrix1.allocator[i] = matrix2.allocator[i];\
+  }
 
 // GNU only, using __VA_ARGS__ to start the Array with stack values
 // if something go wrong its because the size of the matrix that you are trying to use as input is less than the size that you informed
