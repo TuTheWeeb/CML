@@ -4,7 +4,7 @@ CC=gcc
 SRC=src
 BUILD=build
 
-FLAGS=-fopenmp -O3 -Wall -Werror -march=native
+FLAGS=-g -fopenmp -O3 -Wall -Werror 
 
 .PHONY: build run
 

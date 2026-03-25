@@ -9,6 +9,8 @@
   #define CML_CROP 1000
 #endif
 
+#define CML_OMP_DEFAULT "omp parallel for simd schedule(static)"
+
 #define TYPE_LIST(O) \
   O(int8_t, i8, "%d") \
   O(int16_t, i16, "%d") \
@@ -51,7 +53,7 @@ TYPE_LIST(X)
       for (size_t i = 0; i < array.size; i++) array.data[i] = 0; \
       return;\
     }\
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < array.size; i++) array.data[i] = 0; \
   }
 
@@ -62,7 +64,7 @@ TYPE_LIST(X)
       for (size_t i = 0; i < array.size; i++) array.data[i] = 1; \
       return;\
     }\
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < array.size; i++) array.data[i] = 1; \
   }
 
@@ -105,7 +107,7 @@ TYPE_LIST(X)
         dest.data[i] = array1.data[i] + array2.data[i]; \
       } \
     }\
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < array1.size; i++) { \
       dest.data[i] = array1.data[i] + array2.data[i]; \
     } \
@@ -124,7 +126,7 @@ TYPE_LIST(X)
       } \
       return;\
     }\
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < array1.size; i++) { \
       dest.data[i] = array1.data[i] - array2.data[i]; \
     } \
@@ -139,15 +141,10 @@ TYPE_LIST(X)
       } \
       return;\
     }\
-    if (array.size < CML_CROP) {\
-      for (size_t i = 0; i < array.size; i++) { \
-        dest.data[i] = array.data[i] * (T) scalar; \
-      } \
-    }\
-    _Pragma("omp parallel for simd") \
-      for (size_t i = 0; i < array.size; i++) { \
-        dest.data[i] = array.data[i] * (T) scalar; \
-      } \
+    _Pragma(CML_OMP_DEFAULT) \
+    for (size_t i = 0; i < array.size; i++) { \
+      dest.data[i] = array.data[i] * (T) scalar; \
+    } \
   }
 
 // Defines all dot product funcions
@@ -185,7 +182,7 @@ TYPE_LIST(X)
        } \
        return;\
       }\
-      _Pragma("omp parallel for simd") \
+      _Pragma(CML_OMP_DEFAULT) \
       for (size_t i = 0; i < array.size; i++) {\
         dest.data[i] = func(array.data[i]); \
       } \
@@ -247,9 +244,7 @@ TYPE_LIST(GENERATE_ALL)
 
 // For manual use
 #define FreeMatrix(matrix) \
-    for (size_t i = 0; i < matrix.rs; i++) { \
-      free(matrix[i].data); \
-    } \
+    free(matrix.allocator); \
     free(matrix.data);
 
 // For manual use
@@ -257,38 +252,39 @@ TYPE_LIST(GENERATE_ALL)
   FreeArray(*matrix_pointer); \
   free(matrix_pointer);
 
+#define MACRO_MAP_ARRAY(array, code) \
+    for (size_t i = 0; i < array.size; i++) {\
+      code; \
+    }
+
+// Assumes i,j selectors
+#define MACRO_MAP_MATRIX(matrix, code) \
+    for (size_t i = 0; i < matrix.rs; i++) {\
+      for (size_t j = 0; j < matrix.cs; j++) {\
+        code; \
+      } \
+    }
+
 // Defines all zeros functions
 #define DefineZerosMatrix(T) \
   void zeros_##T##Matrix(T##Matrix matrix) { \
     if (matrix.rs * matrix.cs < CML_CROP) {\
-      for (size_t i = 0; i < matrix.rs; i++) { \
-        for (size_t j = 0; j < matrix.cs; j++) \
-          matrix.data[i].data[j] = 0;\
-      } \
+      MACRO_MAP_MATRIX(matrix, matrix.allocator[i * matrix.cs + j] = 0;) \
       return; \
     }\
-    _Pragma("omp parallel for simd") \
-    for (size_t i = 0; i < matrix.rs; i++) { \
-      for (size_t j = 0; j < matrix.cs; j++) \
-        matrix.data[i].data[j] = 0;\
-    } \
+    _Pragma(CML_OMP_DEFAULT) \
+    MACRO_MAP_MATRIX(matrix, matrix.allocator[i * matrix.cs + j] = 0;) \
   }
 
 // Defines all ones functions
 #define DefineOnesMatrix(T) \
   void ones_##T##Matrix(T##Matrix matrix) { \
     if (matrix.rs * matrix.cs < CML_CROP) {\
-      for (size_t i = 0; i < matrix.rs; i++) { \
-        for (size_t j = 0; j < matrix.cs; j++) \
-          matrix.data[i].data[j] = 1;\
-      } \
+      MACRO_MAP_MATRIX(matrix, matrix.allocator[i * matrix.cs + j] = 1;) \
       return;\
     }\
-    _Pragma("omp parallel for simd") \
-    for (size_t i = 0; i < matrix.rs; i++) { \
-      for (size_t j = 0; j < matrix.cs; j++) \
-        matrix.data[i].data[j] = 1;\
-    } \
+    _Pragma(CML_OMP_DEFAULT) \
+    MACRO_MAP_MATRIX(matrix, matrix.allocator[i * matrix.cs + j] = 1;) \
   }
 
 // Defines all rands functions
@@ -303,7 +299,7 @@ TYPE_LIST(GENERATE_ALL)
 #define DefineSumMatrix(T) \
   void sum_##T##Matrix(T##Matrix matrix1, T##Matrix matrix2, T##Matrix dest) { \
     if (matrix1.rs != matrix2.rs || matrix1.cs != matrix2.cs) { \
-      _Pragma("omp parallel for simd") \
+      _Pragma(CML_OMP_DEFAULT) \
       for (size_t i = 0; i < matrix1.rs; i++) {\
         size_t m2_i = i % matrix2.rs; /*makes sure the size is respected*/ \
         for (size_t j = 0; j < matrix1.cs; j++) {\
@@ -313,7 +309,7 @@ TYPE_LIST(GENERATE_ALL)
       }\
       return; \
     } \
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < matrix1.rs; i++) { \
       for (size_t j = 0; j < matrix1.cs; j++) \
         dest.data[i].data[j] = matrix1.data[i].data[j] + matrix2.data[i].data[j]; \
@@ -337,7 +333,7 @@ TYPE_LIST(GENERATE_ALL)
 #define DefineSubMatrix(T)\
     void sub_##T##Matrix(T##Matrix matrix1, T##Matrix matrix2, T##Matrix dest) { \
     if (matrix1.rs != matrix2.rs || matrix1.cs != matrix2.cs) { \
-      _Pragma("omp parallel for simd") \
+      _Pragma(CML_OMP_DEFAULT) \
       for (size_t i = 0; i < matrix1.rs; i++) {\
         size_t m2_i = i % matrix2.rs; /*makes sure the size is respected*/ \
         for (size_t j = 0; j < matrix1.cs; j++) {\
@@ -347,7 +343,7 @@ TYPE_LIST(GENERATE_ALL)
       }\
       return; \
     } \
-    _Pragma("omp parallel for simd") \
+    _Pragma(CML_OMP_DEFAULT) \
     for (size_t i = 0; i < matrix1.rs; i++) { \
       for (size_t j = 0; j < matrix1.cs; j++) \
         dest.data[i].data[j] = matrix1.data[i].data[j] - matrix2.data[i].data[j]; \
@@ -356,19 +352,13 @@ TYPE_LIST(GENERATE_ALL)
 
 // Defines all scalar functions
 #define DefineScalarMULMatrix(T) \
-  void scalar_mul_##T##Matrix(T##Matrix matrix , T scalar, T##Matrix dest) { \
+  void scalar_mul_##T##Matrix(T##Matrix matrix, T scalar, T##Matrix dest) { \
       if (matrix.rs * matrix.cs < CML_CROP) {\
-        for (size_t i = 0; i < matrix.rs; i++) { \
-          for (size_t j = 0; j < matrix.cs; j++) \
-            dest.data[i].data[j] = matrix.data[i].data[j] * scalar; \
-        } \
+        MACRO_MAP_MATRIX(matrix, dest.allocator[i * matrix.cs + j] = matrix.allocator[i * matrix.cs + j] * scalar;)\
         return;\
       }\
-      _Pragma("omp parallel for simd") \
-      for (size_t i = 0; i < matrix.rs; i++) { \
-        for (size_t j = 0; j < matrix.cs; j++) \
-          dest.data[i].data[j] = matrix.data[i].data[j] * scalar; \
-      } \
+      _Pragma(CML_OMP_DEFAULT) \
+      MACRO_MAP_MATRIX(matrix, dest.allocator[i * matrix.cs + j] = matrix.allocator[i * matrix.cs + j] * scalar;)\
   }
 
 // Defines all matrix mul functions 
@@ -377,7 +367,7 @@ TYPE_LIST(GENERATE_ALL)
       if (matrix1.cs != matrix2.rs || dest.rs != matrix1.rs || dest.cs != matrix2.cs) { \
         printf("MatMul dimension mismatch!\n"); return; \
       } \
-      _Pragma("omp parallel for simd") \
+      _Pragma(CML_OMP_DEFAULT) \
       for (size_t i = 0; i < matrix1.rs; i++) { \
         /* Initialize the destination row to 0 first */ \
         for (size_t j = 0; j < matrix2.cs; j++) dest.data[i].data[j] = 0; \
@@ -398,19 +388,11 @@ TYPE_LIST(GENERATE_ALL)
         return; \
       }\
       if (matrix.cs * matrix.rs < CML_CROP) {\
-        for (size_t i = 0; i < matrix.rs; i++) { \
-          for (size_t j = 0; j < matrix.cs; j++) { \
-            dest.data[i] += matrix.data[i].data[j]*array.data[j];\
-        } \
-      } \
+        MACRO_MAP_MATRIX(matrix, dest.data[i] += matrix.allocator[i * matrix.cs + j]*array.data[j];)\
         return;\
       }\
-      _Pragma("omp parallel for simd") \
-      for (size_t i = 0; i < matrix.rs; i++) {\
-        for (size_t j = 0; j < matrix.cs; j++) {\
-          dest.data[i] += matrix.data[i].data[j]*array.data[j];\
-        }\
-      }\
+      _Pragma(CML_OMP_DEFAULT)\
+      MACRO_MAP_MATRIX(matrix, dest.data[i] += matrix.allocator[i * matrix.cs + j]*array.data[j];)\
     }\
 
 #define DefineMatrixTranspose(T) \
@@ -420,19 +402,23 @@ TYPE_LIST(GENERATE_ALL)
         return;\
       }\
       if (matrix.cs * matrix.rs < CML_CROP) {\
-        for (size_t i = 0; i < matrix.rs; i++) { \
-          for (size_t j = 0; j < matrix.cs; j++) { \
-            dest.data[j].data[i] = matrix.data[i].data[j]; \
-        } \
-      } \
+        MACRO_MAP_MATRIX(matrix, dest.data[j].data[i] = matrix.data[i].data[j];)\
         return;\
       }\
-      _Pragma("omp parallel for simd")\
-      for (size_t i = 0; i < matrix.rs; i++) { \
-        for (size_t j = 0; j < matrix.cs; j++) { \
-          dest.data[j].data[i] = matrix.data[i].data[j]; \
-        } \
-      } \
+      _Pragma(CML_OMP_DEFAULT)\
+      MACRO_MAP_MATRIX(matrix, dest.data[j].data[i] = matrix.data[i].data[j];)\
+    }
+
+#define DefineMatrixMean(T)\
+    T mean_matrix_##T##Matrix(T##Matrix matrix) {\
+      T acum = 0; \
+      if (matrix.rs*matrix.cs < CML_CROP) {\
+        MACRO_MAP_MATRIX(matrix, acum+= matrix.allocator[i * matrix.cs + j];)\
+        return acum;\
+      }\
+      _Pragma("omp parallel for simd reduction(+:acum)")\
+      MACRO_MAP_MATRIX(matrix, acum += matrix.allocator[i * matrix.cs + j];)\
+      return acum;\
     }
 
 // Defines all map functions
@@ -496,7 +482,8 @@ TYPE_LIST(GENERATE_ALL)
   DefineMatrixArrayMul(alias) \
   DefineMatrixTranspose(alias) \
   DefineSubMatrix(alias) \
-  DefineSumAxis0Matrix(alias)
+  DefineSumAxis0Matrix(alias) \
+  DefineMatrixMean(alias)
 TYPE_LIST(GENERATE_ALL)
 #undef GENERATE_ALL
 
@@ -525,6 +512,7 @@ TYPE_LIST(GENERATE_ALL)
 #define DISPATCH_MATRIX_TRANSPOSE(real_type, alias, format) alias##Matrix: matrix_transpose_##alias,
 #define DISPATCH_SUB_MATRIX(real_type, alias, format) alias##Matrix: sub_##alias##Matrix,
 #define DISPATCH_SUM_AXIS0_MATRIX(real_type, alias, format) alias##Matrix: sum_axis0_##alias##Matrix,
+#define DISPATCH_MEAN_MATRIX(real_type, alias, format) alias##Matrix: mean_matrix_##alias##Matrix,
 
 // Macro for each variant of functions
 #define cml_zeros(obj) _Generic((obj), \
@@ -598,6 +586,10 @@ TYPE_LIST(GENERATE_ALL)
     TYPE_LIST(DISPATCH_MAP_MATRIX) \
     default: NULL \
     )(obj, func, dest)
+#define cml_mean(obj) _Generic((obj), \
+    TYPE_LIST(DISPATCH_MEAN_MATRIX) \
+    default: NULL \
+    )(obj)
 
 // GNU only, using __VA_ARGS__ to start the Array with stack values
 // if something go wrong its because the size of the array that you are trying to use as input is less than the size that you informed 
@@ -633,7 +625,7 @@ TYPE_LIST(GENERATE_ALL)
   if (matrix1.cs * matrix1.rs < CML_CROP) {\
     for (size_t i = 0; i < matrix1.cs*matrix1.rs; i++) matrix1.allocator[i] = matrix2.allocator[i];\
   } else {\
-    _Pragma("omp parallel for simd")\
+    _Pragma(CML_OMP_DEFAULT)\
     for (size_t i = 0; i < matrix1.cs*matrix1.rs; i++) matrix1.allocator[i] = matrix2.allocator[i];\
   }
 

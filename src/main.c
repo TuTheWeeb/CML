@@ -1,28 +1,35 @@
-#define CML_CROP 100000
+#define CML_CROP 10000
 #include "cml.h"
 
 // Activation Functions for cml_map
-f32 relu(f32 x) { return x > 0 ? x : 0; }
-f32 relu_derivative(f32 x) { return x > 0 ? 1.0f : 0.0f; }
+f64 relu(f64 x) { return x > 0 ? x : 0; }
+f64 relu_derivative(f64 x) { return x > 0 ? 1.0f : 0.0f; }
 // A helper for element-wise multiplication (Hadamard product)
-f32 multiply_elements(f32 a, f32 b) { return a * b; }
+f64 multiply_elements(f64 a, f64 b) { return a * b; }
 
-int main() {
-    size_t hidden_size = 100;
+int main(int argc, char **argv) {
+    size_t hidden_size = 1000;
     size_t out_size = 1;
-    size_t n_samples = 3;
-    f32 learning_rate = 0.01f;
+    #define n_samples 5
+    f64 learning_rate = 0.001f;
     u32 seed = 42;
+    size_t epochs = 100000;
+    f64 input = 8.0f;
+    f64 loss = 1.0f;
+
+    if (argc > 1) epochs = atoll(argv[1]);
+    if (argc > 2) learning_rate = strtod(argv[2], NULL);
+    if (argc > 3) input = strtod(argv[3], NULL);
 
     // 1. The Data
-    MatrixInit(X, f32, 3, 1, 2.0f, 3.0f, 4.0f);
-    MatrixInit(Y, f32, 3, 1, 4.0f, 9.0f, 16.0f);
+    MatrixInit(X, f64, n_samples, 1, -2.0f, -1.0f, 0.0f, 1.f, 2.f);
+    MatrixInit(Y, f64, n_samples, 1, -4.0f, -2.0f, 0.0f, 2.f, 4.f);
 
     // 2. Weights and Biases (Pre-allocating)
-    MatrixInit(W1, f32, 1, hidden_size);
-    MatrixInit(b1, f32, 1, hidden_size);
-    MatrixInit(W2, f32, hidden_size, out_size);
-    MatrixInit(b2, f32, 1, out_size);
+    MatrixInit(W1, f64, 1, hidden_size);
+    MatrixInit(b1, f64, 1, hidden_size);
+    MatrixInit(W2, f64, hidden_size, out_size);
+    MatrixInit(b2, f64, 1, out_size);
 
     // Initialize Weights randomly, Biases to 0
     cml_rand(W1, seed, 0.1f);
@@ -31,30 +38,29 @@ int main() {
     cml_zeros(b2);
 
     // --- Pre-allocate ALL intermediate matrices for the loop ---
-    MatrixInit(Z1, f32, n_samples, hidden_size);
-    MatrixInit(A1, f32, n_samples, hidden_size);
-    MatrixInit(Z2, f32, n_samples, out_size);
-    MatrixInit(A2, f32, n_samples, out_size);
+    MatrixInit(Z1, f64, n_samples, hidden_size);
+    MatrixInit(A1, f64, n_samples, hidden_size);
+    MatrixInit(Z2, f64, n_samples, out_size);
+    MatrixInit(A2, f64, n_samples, out_size);
     
     // Gradients
-    MatrixInit(dZ2, f32, n_samples, out_size);
-    MatrixInit(dW2, f32, hidden_size, out_size);
-    MatrixInit(db2, f32, 1, out_size);
+    MatrixInit(dZ2, f64, n_samples, out_size);
+    MatrixInit(dW2, f64, hidden_size, out_size);
+    MatrixInit(db2, f64, 1, out_size);
     
-    MatrixInit(dA1, f32, n_samples, hidden_size);
-    MatrixInit(dZ1, f32, n_samples, hidden_size);
-    MatrixInit(dW1, f32, 1, hidden_size);
-    MatrixInit(db1, f32, 1, hidden_size);
+    MatrixInit(dA1, f64, n_samples, hidden_size);
+    MatrixInit(dZ1, f64, n_samples, hidden_size);
+    MatrixInit(dW1, f64, 1, hidden_size);
+    MatrixInit(db1, f64, 1, hidden_size);
     
     // Transposes & Math helpers
-    MatrixInit(A1_T, f32, hidden_size, n_samples);
-    MatrixInit(W2_T, f32, out_size, hidden_size);
-    MatrixInit(X_T, f32, 1, n_samples);
-    MatrixInit(relu_deriv_Z1, f32, n_samples, hidden_size);
+    MatrixInit(A1_T, f64, hidden_size, n_samples);
+    MatrixInit(W2_T, f64, out_size, hidden_size);
+    MatrixInit(X_T, f64, 1, n_samples);
+    MatrixInit(relu_deriv_Z1, f64, n_samples, hidden_size);
 
     // 4. The Training Loop
-    for (int epoch = 0; epoch < 100000; epoch++) {
-        
+    for (int epoch = 0; epoch < epochs; epoch++) {
         // --- FORWARD PASS ---
         // Z1 = np.dot(X, W1) + b1
         cml_mul(X, W1, Z1);
@@ -70,6 +76,11 @@ int main() {
         // A2 = Z2
         CopyMatrix(A2, Z2);
         //for(size_t i=0; i<n_samples*out_size; i++) A2.allocator[i] = Z2.allocator[i];
+
+        // loss = np.mean((A2 - Y) ** 2)
+        MatrixInit(dest, f64, n_samples, out_size);
+        cml_sub(A2, Y, dest);
+        loss = cml_mean(dest);
 
         // --- BACKWARD PASS ---
         // dZ2 = 2 * (A2 - Y) / n_samples
@@ -115,6 +126,30 @@ int main() {
         cml_sum(b2, db2, b2);
     }
 
+    MatrixInit(test, f64, 1, 1, input);
+    MatrixInit(predicition, f64, 1, 1, 0);
+    MatrixInit(Z1_test, f64, 1, hidden_size);
+    MatrixInit(A1_test, f64, 1, hidden_size);
+    
+    // Add an intermediate 1x1 matrix for the layer 2 calculation
+    MatrixInit(Z2_test, f64, 1, out_size); 
+
+    // Z1_test = np.dot(test_input, W1) + b1
+    cml_mul(test, W1, Z1_test); // Order fixed: test * W1
+    cml_sum(Z1_test, b1, Z1_test);
+    
+    // A1_test = relu(Z1_test)
+    cml_map(Z1_test, relu, A1_test); // Input fixed to Z1_test
+    
+    // Z2_test = np.dot(A1_test, W2)
+    cml_mul(A1_test, W2, Z2_test); // Destination is now a 1x1 matrix
+    
+    // prediction = Z2_test + b2
+    cml_sum(Z2_test, b2, predicition); 
+    
+    printf("\nAI Predicts:\n");
+    cml_print(predicition);
+    printf("loss: %lf\n", loss);
     printf("Training Complete!\n");
     printf("Final predictions (A2):\n");
     cml_print(A2);
