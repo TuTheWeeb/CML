@@ -163,13 +163,10 @@ TYPE_LIST(X)
 TYPE_LIST(GENERATE_ALL)
 #undef GENERATE_ALL
 
-
-
-
-
 // Declare all types of Matrix
 #define DeclareMatrix(T) typedef struct { \
   T##Array * data; \
+  T * allocator;\
   size_t rs; \
   size_t cs; \
 } T##Matrix;
@@ -193,7 +190,7 @@ TYPE_LIST(GENERATE_ALL)
   void zeros_##T##Matrix(T##Matrix matrix) { \
     _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix.rs; i++) { \
-      for (size_t j = 0; i < matrix.cs; j++) \
+      for (size_t j = 0; j < matrix.cs; j++) \
         matrix.data[i].data[j] = 0;\
     } \
   }
@@ -203,7 +200,7 @@ TYPE_LIST(GENERATE_ALL)
   void ones_##T##Matrix(T##Matrix matrix) { \
     _Pragma("omp parallel for") \
     for (size_t i = 0; i < matrix.rs; i++) { \
-      for (size_t j = 0; i < matrix.cs; j++) \
+      for (size_t j = 0; j < matrix.cs; j++) \
         matrix.data[i].data[j] = 1;\
     } \
   }
@@ -260,6 +257,33 @@ TYPE_LIST(GENERATE_ALL)
       } \
     }
 
+#define DefineMatrixArrayMul(T) \
+    void mul_matrix_array_##T(T##Matrix matrix, T##Array array, T##Array dest) {\
+      if (matrix.cs != array.size) {\
+        printf("matrix and array of incompatible sizes! (%ld x %ld) and (%ld)", matrix.rs, matrix.cs, array.size); \
+        return; \
+      }\
+        for (size_t i = 0; i < matrix.rs; i++) {\
+          for (size_t j = 0; j < matrix.cs; j++) {\
+            dest.data[i] += matrix.data[i].data[j]*array.data[j];\
+          }\
+        }\
+      }\
+
+#define DefineMatrixTranspose(T) \
+    void matrix_transpose_##T(T##Matrix matrix, T##Matrix dest) { \
+      if (matrix.cs != dest.rs || matrix.rs != dest.cs) {\
+        printf("matrix1(%ld x %ld) cant transpose to dest (%ld x %ld)\n", matrix.rs, matrix.cs, dest.rs, dest.cs); \
+        return;\
+      }\
+      _Pragma("omp parallel for")\
+      for (size_t i = 0; i < matrix.rs; i++) { \
+        for (size_t j = 0; j < matrix.cs; j++) { \
+          dest.data[j].data[i] = matrix.data[i].data[j]; \
+        } \
+      } \
+    }
+
 // Defines all map functions
 #define DefineMapMatrix(T) \
     void map_##T##Matrix(T##Matrix matrix, T (*func)(T), T##Matrix dest) { \
@@ -293,11 +317,10 @@ TYPE_LIST(GENERATE_ALL)
 #define DefineMatrixFree(T) \
     void free_##T##Matrix(T##Matrix * matrix) {\
       if (matrix->data != NULL) {\
-        for (size_t i = 0; i < matrix->rs; i++) { \
-          FreeArray(matrix->data[i]); \
-        } \
-        free(matrix->data); \
+        free(matrix->data);\
+        free(matrix->allocator);\
         matrix->data = NULL; \
+        matrix->allocator = NULL; \
       } \
     }
 
@@ -318,8 +341,11 @@ TYPE_LIST(GENERATE_ALL)
   DefineMatrixFree(alias) \
   DefinePrintMatrix(alias) \
   DefineMultiplicationMatrix(alias) \
-  DefinePrintWrapperMatrix(alias)
+  DefinePrintWrapperMatrix(alias) \
+  DefineMatrixArrayMul(alias) \
+  DefineMatrixTranspose(alias)
 TYPE_LIST(GENERATE_ALL)
+#undef GENERATE_ALL
 
 // Creates DISPATCHES for all functions
 #define DISPATCH_ZEROS(real_type, alias, format) alias##Array: zeros_##alias,
@@ -341,6 +367,8 @@ TYPE_LIST(GENERATE_ALL)
 #define DISPATCH_SCALAR_MUL_MATRIX(real_type, alias, format) alias##Matrix: scalar_mul_##alias##Matrix,
 #define DISPATCH_MUL_MATRIX(real_type, alias, format) alias##Matrix: mul_matrix_##alias##Matrix,
 #define DISPATCH_MAP_MATRIX(real_type, alias, format) alias##Matrix: map_##alias##Matrix,
+#define DISPATCH_MATRIX_ARRAY_MUL(real_type, alias, format) alias##Matrix: mul_matrix_array_##alias,
+#define DISPATCH_MATRIX_TRANSPOSE(real_type, alias, format) alias##Matrix: matrix_transpose_##alias,
 
 // Macro for each variant of functions
 #define cml_zeros(obj) _Generic((obj), \
@@ -384,10 +412,22 @@ TYPE_LIST(GENERATE_ALL)
 #define cml_dot(obj1, obj2) _Generic((obj1), \
     TYPE_LIST(DISPATCH_DOT) \
     default: NULL)(obj1, obj2)
-#define cml_mul_matrix(matrix1, matrix2, dest) _Generic((matrix1), \
+
+#define cml_mul(matrix, obj, obj_dest) _Generic((matrix), \
     TYPE_LIST(DISPATCH_MUL_MATRIX) \
     default: NULL \
-    )(matrix1, matrix2, dest)
+    )(matrix, obj, obj_dest)
+
+#define cml_mul_array(matrix, obj, obj_dest) _Generic((matrix), \
+    TYPE_LIST(DISPATCH_MATRIX_ARRAY_MUL) \
+    default: NULL \
+    )(matrix, obj, obj_dest)
+
+#define cml_transpose(matrix, dest) _Generic((matrix), \
+    TYPE_LIST(DISPATCH_MATRIX_TRANSPOSE) \
+    default: NULL \
+    )(matrix, dest)
+
 #define cml_map(obj, func, dest) _Generic((obj), \
     TYPE_LIST(DISPATCH_MAP) \
     TYPE_LIST(DISPATCH_MAP_MATRIX) \
@@ -409,36 +449,36 @@ TYPE_LIST(GENERATE_ALL)
 
 // Garante que vai fazer o Loop uma unica vez
 #define MATRIX_INIT_1(name, T, rows, cols) \
-    for (size_t i = 0; i < name.rs; i++) { \
-      name.data[i] = Array(T, cols); \
-    }
+    for (size_t i = 0; i < rows*cols; i+=cols) {\
+      name.data[i/cols].data = name.allocator + i;\
+      name.data[i/cols].size = cols;\
+    }\
 
 #define MATRIX_INIT_0(name, T, rows, cols, ...) \
     { \
       T _tmp_buff[rows][cols] = {__VA_ARGS__}; \
-      for (size_t i = 0; i < name.rs; i++) { \
-        name.data[i] = Array(T, cols); \
-        memcpy(name.data[i].data, _tmp_buff[i], cols*sizeof(T)); \
+      for (size_t i = 0; i < rows*cols; i+=cols) { \
+        name.data[i/cols].data = name.allocator + i;\
+        name.data[i/cols].size = cols;\
+        memcpy(name.data[i/cols].data, _tmp_buff[i/cols], cols*sizeof(T)); \
       } \
     }
 
 // GNU only, using __VA_ARGS__ to start the Array with stack values
 // if something go wrong its because the size of the matrix that you are trying to use as input is less than the size that you informed
 #define MatrixInit(name, T, rows, cols, ...) \
-  __attribute__((cleanup(free_##T##Matrix))) T##Matrix name = (T##Matrix) {\
-      .data = (T##Array*) malloc(sizeof(T##Array) * (rows)),\
+  __attribute__((cleanup(free_##T##Matrix))) T##Matrix name; \
+  {\
+    name = (T##Matrix) {\
+      .data=(T##Array*) malloc(sizeof(T##Array) * rows), \
+      .allocator=malloc(sizeof(T) * rows * cols), \
       .rs=rows,\
       .cs=cols \
-  }; \
-  CONCAT(MATRIX_INIT_, IS_EMPTY(__VA_ARGS__))(name, T, rows, cols __VA_OPT__(,) __VA_ARGS__)
+    }; \
+    CONCAT(MATRIX_INIT_, IS_EMPTY(__VA_ARGS__))(name, T, rows, cols __VA_OPT__(,) __VA_ARGS__) \
+  }
 
 int main() {
-  MatrixInit(matrix, f32, 2, 2, {1.0, 3.0}, {2.0, 2.0});
-  MatrixInit(matrix1, f32, 2, 2, {2.0, 3.0}, {3.0, 5.0});
-  MatrixInit(matrix2, f32, 2, 2);
-
-  cml_mul_matrix(matrix, matrix1, matrix2);
-  cml_print(matrix2);
 
   return 0;
 }
