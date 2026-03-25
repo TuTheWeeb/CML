@@ -630,7 +630,3 @@ TYPE_LIST(GENERATE_ALL)
     }; \
     CONCAT(MATRIX_INIT_, IS_EMPTY(__VA_ARGS__))(name, T, rows, cols __VA_OPT__(,) __VA_ARGS__) \
   }
-
-int main() {
-  return 0;
-}
